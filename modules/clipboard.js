@@ -6,7 +6,9 @@ import {
   EmbedBlot,
   Scope,
   StyleAttributor,
+  BlockBlot,
 } from 'parchment';
+import { BlockEmbed } from '../blots/block';
 import Quill from '../core/quill';
 import logger from '../core/logger';
 import Module from '../core/module';
@@ -61,8 +63,8 @@ const STYLE_ATTRIBUTORS = [
 class Clipboard extends Module {
   constructor(quill, options) {
     super(quill, options);
-    this.quill.root.addEventListener('copy', e => this.onCopy(e, false));
-    this.quill.root.addEventListener('cut', e => this.onCopy(e, true));
+    this.quill.root.addEventListener('copy', e => this.onCaptureCopy(e, false));
+    this.quill.root.addEventListener('cut', e => this.onCaptureCopy(e, true));
     this.quill.root.addEventListener('paste', this.onCapturePaste.bind(this));
     this.matchers = [];
     CLIPBOARD_CONFIG.concat(this.options.matchers).forEach(
@@ -81,13 +83,11 @@ class Clipboard extends Module {
       return new Delta().insert(text, {
         [CodeBlock.blotName]: formats[CodeBlock.blotName],
       });
-    } else if (!html) {
+    }
+    if (!html) {
       return new Delta().insert(text || '');
     }
-    const doc = new DOMParser().parseFromString(
-      html.replace(/>\r?\n +</g, '><'), // Remove spaces between tags
-      'text/html',
-    );
+    const doc = new DOMParser().parseFromString(html, 'text/html');
     const container = doc.body;
     const nodeMatches = new WeakMap();
     const [elementMatchers, textMatchers] = this.prepareMatching(
@@ -126,26 +126,12 @@ class Clipboard extends Module {
     }
   }
 
-  onCaptureCopy(range) {
-    const text = this.quill.getText(range);
-    const html = this.quill.getSemanticHTML(range);
-    return { html, text };
-  }
-
-  onCapturePaste(e) {
-    if (e.defaultPrevented || !this.quill.isEnabled()) return;
-    e.preventDefault();
-    const range = this.quill.getSelection(true);
-    if (range == null) return;
-    this.onPaste(e, range);
-  }
-
-  onCopy(e, isCut = false) {
+  onCaptureCopy(e, isCut = false) {
     if (e.defaultPrevented) return;
     e.preventDefault();
     const [range] = this.quill.selection.getRange();
     if (range == null) return;
-    const { html, text } = this.onCaptureCopy(range, isCut);
+    const { html, text } = this.onCopy(range, isCut);
     e.clipboardData.setData('text/plain', text);
     e.clipboardData.setData('text/html', html);
     if (isCut) {
@@ -153,14 +139,28 @@ class Clipboard extends Module {
     }
   }
 
-  onPaste(e, range) {
+  onCapturePaste(e) {
+    if (e.defaultPrevented || !this.quill.isEnabled()) return;
+    e.preventDefault();
+    const range = this.quill.getSelection(true);
+    if (range == null) return;
     const html = e.clipboardData.getData('text/html');
     const text = e.clipboardData.getData('text/plain');
     const files = Array.from(e.clipboardData.files || []);
     if (!html && files.length > 0) {
       this.quill.uploader.upload(range, files);
-      return;
+    } else {
+      this.onPaste(range, { html, text });
     }
+  }
+
+  onCopy(range) {
+    const text = this.quill.getText(range);
+    const html = this.quill.getSemanticHTML(range);
+    return { html, text };
+  }
+
+  onPaste(range, { text, html }) {
     const formats = this.quill.getFormat(range.index);
     const pastedDelta = this.convert({ text, html }, formats);
     debug.log('onPaste', pastedDelta, { text, html });
@@ -298,7 +298,8 @@ function traverse(scroll, node, elementMatchers, textMatchers, nodeMatches) {
     return textMatchers.reduce((delta, matcher) => {
       return matcher(node, delta, scroll);
     }, new Delta());
-  } else if (node.nodeType === node.ELEMENT_NODE) {
+  }
+  if (node.nodeType === node.ELEMENT_NODE) {
     return Array.from(node.childNodes || []).reduce((delta, childNode) => {
       let childrenDelta = traverse(
         scroll,
@@ -368,8 +369,13 @@ function matchBlot(node, delta, scroll) {
       embed[match.blotName] = value;
       return new Delta().insert(embed, match.formats(node, scroll));
     }
-  } else if (typeof match.formats === 'function') {
-    return applyFormat(delta, match.blotName, match.formats(node, scroll));
+  } else {
+    if (match.prototype instanceof BlockBlot && !deltaEndsWith(delta, '\n')) {
+      delta.insert('\n');
+    }
+    if (typeof match.formats === 'function') {
+      return applyFormat(delta, match.blotName, match.formats(node, scroll));
+    }
   }
   return delta;
 }
@@ -409,9 +415,12 @@ function matchIndent(node, delta, scroll) {
     parent = parent.parentNode;
   }
   if (indent <= 0) return delta;
-  return delta.compose(
-    new Delta().retain(delta.length() - 1).retain(1, { indent }),
-  );
+  return delta.reduce((composed, op) => {
+    if (op.attributes && op.attributes.list) {
+      return composed.push(op);
+    }
+    return composed.insert(op.insert, { indent, ...(op.attributes || {}) });
+  }, new Delta());
 }
 
 function matchList(node, delta) {
@@ -419,13 +428,23 @@ function matchList(node, delta) {
   return applyFormat(delta, 'list', list);
 }
 
-function matchNewline(node, delta) {
+function matchNewline(node, delta, scroll) {
   if (!deltaEndsWith(delta, '\n')) {
-    if (
-      isLine(node) ||
-      (delta.length() > 0 && node.nextSibling && isLine(node.nextSibling))
-    ) {
-      delta.insert('\n');
+    if (isLine(node)) {
+      return delta.insert('\n');
+    }
+    if (delta.length() > 0 && node.nextSibling) {
+      let { nextSibling } = node;
+      while (nextSibling != null) {
+        if (isLine(nextSibling)) {
+          return delta.insert('\n');
+        }
+        const match = scroll.query(nextSibling);
+        if (match && match.prototype instanceof BlockEmbed) {
+          return delta.insert('\n');
+        }
+        nextSibling = nextSibling.firstChild;
+      }
     }
   }
   return delta;
@@ -469,7 +488,7 @@ function matchText(node, delta) {
   if (node.parentNode.tagName === 'O:P') {
     return delta.insert(text.trim());
   }
-  if (text.trim().length === 0 && node.parentNode == null) {
+  if (text.trim().length === 0 && text.includes('\n')) {
     return delta;
   }
   if (!isPre(node)) {

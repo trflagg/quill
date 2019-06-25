@@ -357,6 +357,55 @@ describe('Editor', function() {
       );
     });
 
+    it('insert text before block embed', function() {
+      const editor = this.initialize(
+        Editor,
+        '<p>0123</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+      editor.applyDelta(new Delta().retain(5).insert('5678'));
+      expect(this.container).toEqualHTML(
+        '<p>0123</p><p>5678</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+    });
+
+    it('insert attributed text before block embed', function() {
+      const editor = this.initialize(
+        Editor,
+        '<p>0123</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+      editor.applyDelta(new Delta().retain(5).insert('5678', { bold: true }));
+      expect(this.container).toEqualHTML(
+        '<p>0123</p><p><strong>5678</strong></p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+    });
+
+    it('insert text with newline before block embed', function() {
+      const editor = this.initialize(
+        Editor,
+        '<p>0123</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+      editor.applyDelta(new Delta().retain(5).insert('5678\n'));
+      expect(this.container).toEqualHTML(
+        '<p>0123</p><p>5678</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+    });
+
+    it('insert attributed text with newline before block embed', function() {
+      const editor = this.initialize(
+        Editor,
+        '<p>0123</p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+      editor.applyDelta(
+        new Delta()
+          .retain(5)
+          .insert('5678', { bold: true })
+          .insert('\n'),
+      );
+      expect(this.container).toEqualHTML(
+        '<p>0123</p><p><strong>5678</strong></p><iframe src="#" class="ql-video" frameborder="0" allowfullscreen="true"></iframe>',
+      );
+    });
+
     it('improper block embed insert', function() {
       const editor = this.initialize(Editor, '<p>0123</p>');
       editor.applyDelta(new Delta().retain(2).insert({ video: '#' }));
@@ -548,6 +597,30 @@ describe('Editor', function() {
       );
     });
 
+    it('mixed list', function() {
+      const editor = this.initialize(
+        Editor,
+        `
+          <ol>
+            <li data-list="ordered">One</li>
+            <li data-list="ordered">Two</li>
+            <li data-list="bullet">Foo</li>
+            <li data-list="bullet">Bar</li>
+          </ol>
+        `,
+      );
+      expect(editor.getHTML(2, 12)).toEqualHTML(`
+        <ol>
+          <li>e</li>
+          <li>Two</li>
+        </ol>
+        <ul>
+          <li>Foo</li>
+          <li>Ba</li>
+        </ul>
+      `);
+    });
+
     it('nested list', function() {
       const editor = this.initialize(
         Editor,
@@ -609,6 +682,36 @@ describe('Editor', function() {
           </li>
           <li data-list="checked">Thr</li>
         </ul>
+      `);
+    });
+
+    it('partial list', function() {
+      const editor = this.initialize(
+        Editor,
+        `
+        <ol>
+          <li data-list="ordered">1111</li>
+          <li data-list="ordered" class="ql-indent-1">AAAA</li>
+          <li data-list="ordered" class="ql-indent-2">IIII</li>
+          <li data-list="ordered" class="ql-indent-1">BBBB</li>
+          <li data-list="ordered">2222</li>
+        </ol>
+        `,
+      );
+      expect(editor.getHTML(12, 12)).toEqualHTML(`
+        <ol>
+          <li>
+            <ol>
+              <li>
+                <ol>
+                  <li>II</li>
+                </ol>
+              </li>
+              <li>BBBB</li>
+            </ol>
+          </li>
+          <li>2222</li>
+        </ol>
       `);
     });
 

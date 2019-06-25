@@ -75,9 +75,6 @@ class Quill {
     this.container.innerHTML = '';
     instances.set(this.container, this);
     this.root = this.addContainer('ql-editor');
-    this.root.addEventListener('dragstart', e => {
-      e.preventDefault();
-    });
     this.root.classList.add('ql-blank');
     this.root.setAttribute('data-gramm', false);
     this.scrollingContainer = this.options.scrollingContainer || this.root;
@@ -105,7 +102,7 @@ class Quill {
       const oldRange = this.selection.lastRange;
       const [newRange] = this.selection.getRange();
       const selectionInfo =
-        oldRange && newRange ? [oldRange, newRange] : undefined;
+        oldRange && newRange ? { oldRange, newRange } : undefined;
       modify.call(
         this,
         () => this.editor.update(null, mutations, selectionInfo),
@@ -183,9 +180,8 @@ class Quill {
       () => {
         const range = this.getSelection(true);
         let change = new Delta();
-        if (range == null) {
-          return change;
-        } else if (this.scroll.query(name, Parchment.Scope.BLOCK)) {
+        if (range == null) return change;
+        if (this.scroll.query(name, Parchment.Scope.BLOCK)) {
           change = this.editor.formatLine(range.index, range.length, {
             [name]: value,
           });

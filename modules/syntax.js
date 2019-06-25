@@ -8,7 +8,7 @@ import BreakBlot from '../blots/break';
 import CursorBlot from '../blots/cursor';
 import TextBlot, { escapeText } from '../blots/text';
 import CodeBlock, { CodeBlockContainer } from '../formats/code';
-import { traverse } from '../modules/clipboard';
+import { traverse } from './clipboard';
 
 const TokenAttributor = new ClassAttributor('code-token', 'hljs', {
   scope: Scope.INLINE,
@@ -112,7 +112,7 @@ class SyntaxCodeBlockContainer extends CodeBlockContainer {
     if (forced || this.forceNext || this.cachedText !== text) {
       if (text.trim().length > 0 || this.cachedText == null) {
         const oldDelta = this.children.reduce((delta, child) => {
-          return delta.concat(blockDelta(child));
+          return delta.concat(blockDelta(child, false));
         }, new Delta());
         const delta = highlight(text, language);
         oldDelta.diff(delta).reduce((index, { retain, attributes }) => {
